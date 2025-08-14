@@ -2,7 +2,7 @@
     "name": "primalmaxor/laravel-env-doctor",
     "description": "A Laravel package to diagnose and fix common environment configuration issues",
     "type": "library",
-    "version": "1.0.0",
+    "version": "1.0.1",
     "license": "MIT",
     "authors": [
         {
