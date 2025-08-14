@@ -5,6 +5,9 @@ namespace Primalmaxor\LaravelEnvDoctor;
 use Illuminate\Support\ServiceProvider;
 use Primalmaxor\LaravelEnvDoctor\Console\Commands\CompareEnvCommand;
 use Primalmaxor\LaravelEnvDoctor\Console\Commands\AuditEnvUsageCommand;
+use Primalmaxor\LaravelEnvDoctor\Console\Commands\FixEnvCommand;
+use Primalmaxor\LaravelEnvDoctor\Console\Commands\LintEnvCommand;
+use Primalmaxor\LaravelEnvDoctor\Console\Commands\SecurityEnvCommand;
 
 class LaravelEnvDoctorServiceProvider extends ServiceProvider
 {
@@ -25,6 +28,9 @@ class LaravelEnvDoctorServiceProvider extends ServiceProvider
             $this->commands([
                 CompareEnvCommand::class,
                 AuditEnvUsageCommand::class,
+                FixEnvCommand::class,
+                LintEnvCommand::class,
+                SecurityEnvCommand::class,
             ]);
 
             $this->publishes([

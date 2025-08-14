@@ -52,7 +52,10 @@
         "demo": "php examples/demo.php",
         "pint": "vendor/bin/pint",
         "stan": "vendor/bin/phpstan analyse src tests",
-        "audit": "php artisan env:audit --config --detailed"
+        "audit": "php artisan env:audit --config --detailed",
+        "fix": "php artisan env:fix --backup",
+        "lint": "php artisan env:lint --strict",
+        "security": "php artisan env:security --strict --check-git"
     },
     "prefer-stable": true
 } 

@@ -10,6 +10,9 @@ A Laravel package to diagnose and fix common environment configuration issues by
 - ⚠️ Identify different values for the same keys
 - 🌐 Compare all environment files in your project
 - 🔍 Audit entire project for environment variable usage
+- 🛠️ **Auto-fix missing variables and formatting issues**
+- ✅ **Lint environment files for syntax and best practices**
+- 🔒 **Security scanning for sensitive data exposure**
 - 📝 Detailed reporting with summaries
 
 ## Installation
@@ -77,6 +80,48 @@ Audit with config file checking and detailed output:
 php artisan env:audit --config --detailed
 ```
 
+### Auto-Fix Environment Issues
+
+Automatically fix missing variables and formatting issues:
+
+```bash
+php artisan env:fix
+```
+
+With backup and interactive mode:
+
+```bash
+php artisan env:fix --backup --interactive
+```
+
+### Lint Environment Files
+
+Check for syntax errors and best practices:
+
+```bash
+php artisan env:lint
+```
+
+With strict mode and different output formats:
+
+```bash
+php artisan env:lint --strict --format=json
+```
+
+### Security Scanning
+
+Scan for security issues and sensitive data:
+
+```bash
+php artisan env:security
+```
+
+With Git tracking check and strict mode:
+
+```bash
+php artisan env:security --strict --check-git
+```
+
 ## Command Options
 
 | Option | Description | Default |
@@ -93,6 +138,33 @@ php artisan env:audit --config --detailed
 | `--env` | Path to the main env file | `.env` |
 | `--config` | Also check config files for environment usage | `false` |
 | `--detailed` | Show detailed file locations for each usage | `false` |
+
+### env:fix Command Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--example` | Path to the example env file | `.env.example` |
+| `--env` | Path to the main env file | `.env` |
+| `--backup` | Create backup before making changes | `false` |
+| `--interactive` | Ask for confirmation before each change | `false` |
+| `--dry-run` | Show what would be changed without making changes | `false` |
+
+### env:lint Command Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--file` | Path to the env file to lint | `.env` |
+| `--strict` | Enable strict mode for additional checks | `false` |
+| `--format` | Output format (text, json, xml) | `text` |
+
+### env:security Command Options
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--file` | Path to the env file to scan | `.env` |
+| `--strict` | Enable strict security checks | `false` |
+| `--check-git` | Check if sensitive files are committed to git | `false` |
+| `--format` | Output format (text, json, xml) | `text` |
 
 ## Output Examples
 
@@ -150,6 +222,74 @@ Summary:
   Missing in .env: 4
   Unused in .env.example: 10
   Unused in .env: 8
+```
+
+### Auto-Fix Output
+
+```
+Fixing environment file: .env
+
+Found 3 missing variables:
+  - APP_DEBUG
+  - CACHE_DRIVER
+  - SESSION_DRIVER
+
+Added: APP_DEBUG=true
+Added: CACHE_DRIVER=file
+Added: SESSION_DRIVER=file
+
+Formatting fixes applied:
+  - Fixed spacing: APP_NAME = Laravel → APP_NAME=Laravel
+  - Added quotes: APP_URL = http://localhost → APP_URL="http://localhost"
+
+Environment file updated successfully!
+```
+
+### Linting Output
+
+```
+Linting environment file: .env
+
+Found 4 issues:
+  Errors: 1
+  Warnings: 2
+  Info: 1
+
+[ERROR] Line 5: Missing equals sign (=)
+  APP_NAME Laravel
+
+[WARNING] Line 8: Spaces around equals sign (recommended: no spaces)
+  APP_DEBUG = true
+
+[WARNING] Line 12: Value with spaces should be quoted
+  APP_URL = http://localhost
+
+[INFO] Line 15: Key should be uppercase (Laravel convention)
+  app_env = local
+```
+
+### Security Scan Output
+
+```
+🔒 Security scanning environment file: .env
+
+🔍 Security Scan Results:
+  Critical: 1
+  High: 2
+  Medium: 1
+  Low: 1
+
+[HIGH] ERROR - Line 8: Sensitive key detected: DB_PASSWORD
+  DB_PASSWORD=password
+  💡 Recommendation: Use a strong, unique password with at least 12 characters
+
+[HIGH] ERROR - Line 12: Weak password detected: password
+  API_SECRET=password
+  💡 Recommendation: Use a strong, unique password
+
+[CRITICAL] ERROR - GIT: Environment file is tracked by Git: .env
+  File is committed to version control
+  💡 Recommendation: Remove from Git tracking: git rm --cached .env
 ```
 
 ## Configuration
