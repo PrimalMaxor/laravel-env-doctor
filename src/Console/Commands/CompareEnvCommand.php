@@ -16,7 +16,9 @@ class CompareEnvCommand extends Command
     protected $signature = 'env:compare 
                             {--example= : Path to the example env file (default: .env.example)}
                             {--env= : Path to the main env file (default: .env)}
-                            {--all : Compare all env files in the project}';
+                            {--all : Compare all env files in the project}
+                            {--detailed : Show detailed line-by-line differences}
+                            {--summary-only : Show only summary without details}';
 
     /**
      * The console command description.
@@ -33,18 +35,20 @@ class CompareEnvCommand extends Command
         $examplePath = $this->option('example') ?: '.env.example';
         $envPath = $this->option('env') ?: '.env';
         $compareAll = $this->option('all');
+        $detailed = $this->option('detailed');
+        $summaryOnly = $this->option('summary-only');
 
         if ($compareAll) {
-            return $this->compareAllEnvFiles($examplePath);
+            return $this->compareAllEnvFiles($examplePath, $detailed, $summaryOnly);
         }
 
-        return $this->compareTwoFiles($examplePath, $envPath);
+        return $this->compareTwoFiles($examplePath, $envPath, $detailed, $summaryOnly);
     }
 
     /**
      * Compare two specific environment files.
      */
-    private function compareTwoFiles(string $examplePath, string $envPath): int
+    private function compareTwoFiles(string $examplePath, string $envPath, bool $detailed, bool $summaryOnly): int
     {
         if (!File::exists($examplePath)) {
             $this->error("Example file not found: {$examplePath}");
@@ -64,7 +68,7 @@ class CompareEnvCommand extends Command
         $exampleVars = $this->parseEnvFile($examplePath);
         $envVars = $this->parseEnvFile($envPath);
 
-        $this->showDifferences($examplePath, $envPath, $exampleVars, $envVars);
+        $this->showDifferences($examplePath, $envPath, $exampleVars, $envVars, $detailed, $summaryOnly);
 
         return 0;
     }
@@ -72,7 +76,7 @@ class CompareEnvCommand extends Command
     /**
      * Compare all environment files with the example file.
      */
-    private function compareAllEnvFiles(string $examplePath): int
+    private function compareAllEnvFiles(string $examplePath, bool $detailed, bool $summaryOnly): int
     {
         if (!File::exists($examplePath)) {
             $this->error("Example file not found: {$examplePath}");
@@ -103,7 +107,7 @@ class CompareEnvCommand extends Command
             $this->line(str_repeat('=', 50));
 
             $envVars = $this->parseEnvFile($envFile);
-            $this->showDifferences($examplePath, $envFile, $exampleVars, $envVars);
+            $this->showDifferences($examplePath, $envFile, $exampleVars, $envVars, $detailed, $summaryOnly);
         }
 
         return 0;
@@ -118,7 +122,7 @@ class CompareEnvCommand extends Command
         $finder->files()
             ->name('*.env*')
             ->in(base_path())
-            ->exclude(['vendor', 'node_modules', '.git']);
+            ->exclude(['vendor', 'node_modules', '.git', 'storage', 'bootstrap/cache']);
 
         $files = [];
 
@@ -134,6 +138,10 @@ class CompareEnvCommand extends Command
      */
     private function parseEnvFile(string $filePath): array
     {
+        if (!File::exists($filePath)) {
+            return [];
+        }
+
         $content = File::get($filePath);
         $lines = explode("\n", $content);
         $vars = [];
@@ -149,7 +157,9 @@ class CompareEnvCommand extends Command
             if (count($parts) === 2) {
                 $key = trim($parts[0]);
                 $value = trim($parts[1]);
-                $vars[$key] = $value;
+                if (!empty($key)) {
+                    $vars[$key] = $value;
+                }
             }
         }
 
@@ -159,7 +169,7 @@ class CompareEnvCommand extends Command
     /**
      * Show differences between two environment files.
      */
-    private function showDifferences(string $examplePath, string $envPath, array $exampleVars, array $envVars): void
+    private function showDifferences(string $examplePath, string $envPath, array $exampleVars, array $envVars, bool $detailed, bool $summaryOnly): void
     {
         $exampleKeys = array_keys($exampleVars);
         $envKeys = array_keys($envVars);
@@ -169,6 +179,10 @@ class CompareEnvCommand extends Command
             $this->warn("Missing in {$envPath} (present in {$examplePath}):");
             foreach ($missingInEnv as $key) {
                 $this->line("  - {$key}");
+                
+                if ($detailed) {
+                    $this->line("    Example value: {$exampleVars[$key]}");
+                }
             }
             $this->line('');
         }
@@ -178,6 +192,10 @@ class CompareEnvCommand extends Command
             $this->warn("Extra in {$envPath} (not in {$examplePath}):");
             foreach ($extraInEnv as $key) {
                 $this->line("  - {$key}");
+                
+                if ($detailed) {
+                    $this->line("    Current value: {$envVars[$key]}");
+                }
             }
             $this->line('');
         }
@@ -196,19 +214,30 @@ class CompareEnvCommand extends Command
 
         if (!empty($differentValues)) {
             $this->warn("Different values between {$examplePath} and {$envPath}:");
+
             foreach ($differentValues as $key => $values) {
                 $this->line("  {$key}:");
                 $this->line("    {$examplePath}: {$values['example']}");
                 $this->line("    {$envPath}: {$values['env']}");
             }
+
             $this->line('');
         }
 
-        $this->info("Summary:");
-        $this->line("  Total keys in {$examplePath}: " . count($exampleVars));
-        $this->line("  Total keys in {$envPath}: " . count($envVars));
-        $this->line("  Missing keys: " . count($missingInEnv));
-        $this->line("  Extra keys: " . count($extraInEnv));
-        $this->line("  Different values: " . count($differentValues));
+        if (!$summaryOnly) {
+            $this->info("Summary:");
+            $this->line("  Total keys in {$examplePath}: " . count($exampleVars));
+            $this->line("  Total keys in {$envPath}: " . count($envVars));
+            $this->line("  Missing keys: " . count($missingInEnv));
+            $this->line("  Extra keys: " . count($extraInEnv));
+            $this->line("  Different values: " . count($differentValues));
+        }
+
+        if ($detailed && !empty($exampleVars)) {
+            $this->line('');
+            $this->info("Detailed Analysis:");
+            $this->line("  Coverage: " . round((count($commonKeys) / count($exampleKeys)) * 100, 1) . "% of example variables are set");
+            $this->line("  Completeness: " . round((count($envVars) / max(count($exampleVars), 1)) * 100, 1) . "% of environment file is complete");
+        }
     }
 } 

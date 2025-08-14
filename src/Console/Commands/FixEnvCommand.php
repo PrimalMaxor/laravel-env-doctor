@@ -17,7 +17,10 @@ class FixEnvCommand extends Command
                             {--env= : Path to the main env file (default: .env)}
                             {--backup : Create backup before making changes}
                             {--interactive : Ask for confirmation before each change}
-                            {--dry-run : Show what would be changed without making changes}';
+                            {--dry-run : Show what would be changed without making changes}
+                            {--format : Fix formatting issues (spacing, quotes)}
+                            {--add-missing : Add missing variables from example file}
+                            {--remove-unused : Remove variables not in example file}';
 
     /**
      * The console command description.
@@ -36,6 +39,14 @@ class FixEnvCommand extends Command
         $backup = $this->option('backup');
         $interactive = $this->option('interactive');
         $dryRun = $this->option('dry-run');
+        $format = $this->option('format');
+        $addMissing = $this->option('add-missing');
+        $removeUnused = $this->option('remove-unused');
+
+        if (!$format && !$addMissing && !$removeUnused) {
+            $format = true;
+            $addMissing = true;
+        }
 
         if (!File::exists($examplePath)) {
             $this->error("Example file not found: {$examplePath}");
@@ -62,27 +73,65 @@ class FixEnvCommand extends Command
             $this->info("Backup created: {$backupPath}");
         }
 
-        $missingVars = array_diff_key($exampleVars, $envVars);
-        
-        if (empty($missingVars)) {
-            $this->info("No missing variables found. Your .env file is up to date!");
+        $fixedContent = $originalContent;
+        $changes = [];
 
-            return 0;
+        if ($addMissing) {
+            $missingVars = array_diff_key($exampleVars, $envVars);
+            
+            if (!empty($missingVars)) {
+                $this->info("Found " . count($missingVars) . " missing variables:");
+
+                foreach ($missingVars as $key => $value) {
+                    $this->line("  - {$key}");
+                }
+
+                $this->line('');
+
+                $fixedContent = $this->addMissingVariables($fixedContent, $missingVars, $interactive, $dryRun, $changes);
+            } else {
+                $this->info("No missing variables found.");
+            }
         }
 
-        $this->info("Found " . count($missingVars) . " missing variables:");
-        foreach ($missingVars as $key => $value) {
-            $this->line("  - {$key}");
+        if ($removeUnused) {
+            $unusedVars = array_diff_key($envVars, $exampleVars);
+            
+            if (!empty($unusedVars)) {
+                $this->info("Found " . count($unusedVars) . " unused variables:");
+
+                foreach ($unusedVars as $key => $value) {
+                    $this->line("  - {$key}");
+                }
+
+                $this->line('');
+
+                $fixedContent = $this->removeUnusedVariables($fixedContent, $unusedVars, $interactive, $dryRun, $changes);
+            } else {
+                $this->info("No unused variables found.");
+            }
         }
-        $this->line('');
 
-        $fixedContent = $this->fixMissingVariables($originalContent, $missingVars, $interactive, $dryRun);
-        $fixedContent = $this->fixFormattingIssues($fixedContent, $dryRun);
+        if ($format) {
+            $this->info("Checking formatting issues...");
+            $fixedContent = $this->fixFormattingIssues($fixedContent, $dryRun, $changes);
+        }
 
-        if (!$dryRun) {
+        if (!empty($changes)) {
+            $this->line('');
+            $this->info("Changes Summary:");
+
+            foreach ($changes as $change) {
+                $this->line("  - {$change}");
+            }
+        } else {
+            $this->info("No changes needed.");
+        }
+
+        if (!$dryRun && $fixedContent !== $originalContent) {
             File::put($envPath, $fixedContent);
             $this->info("Environment file updated successfully!");
-        } else {
+        } elseif ($dryRun) {
             $this->info("Dry run completed. No changes were made.");
         }
 
@@ -94,6 +143,10 @@ class FixEnvCommand extends Command
      */
     private function parseEnvFile(string $filePath): array
     {
+        if (!File::exists($filePath)) {
+            return [];
+        }
+
         $content = File::get($filePath);
         $lines = explode("\n", $content);
         $vars = [];
@@ -109,7 +162,9 @@ class FixEnvCommand extends Command
             if (count($parts) === 2) {
                 $key = trim($parts[0]);
                 $value = trim($parts[1]);
-                $vars[$key] = $value;
+                if (!empty($key)) {
+                    $vars[$key] = $value;
+                }
             }
         }
 
@@ -117,9 +172,9 @@ class FixEnvCommand extends Command
     }
 
     /**
-     * Fix missing variables in the content.
+     * Add missing variables to the content.
      */
-    private function fixMissingVariables(string $content, array $missingVars, bool $interactive, bool $dryRun): string
+    private function addMissingVariables(string $content, array $missingVars, bool $interactive, bool $dryRun, array &$changes): string
     {
         $lines = explode("\n", $content);
         $newLines = [];
@@ -140,7 +195,50 @@ class FixEnvCommand extends Command
                 if (!$dryRun) {
                     $this->line("Added: {$key}={$value}");
                 }
+                $changes[] = "Added missing variable: {$key}";
             }
+        }
+
+        return implode("\n", $newLines);
+    }
+
+    /**
+     * Remove unused variables from the content.
+     */
+    private function removeUnusedVariables(string $content, array $unusedVars, bool $interactive, bool $dryRun, array &$changes): string
+    {
+        $lines = explode("\n", $content);
+        $newLines = [];
+
+        foreach ($lines as $line) {
+            $trimmedLine = trim($line);
+            
+            if (empty($trimmedLine) || str_starts_with($trimmedLine, '#')) {
+                $newLines[] = $line;
+                continue;
+            }
+
+            if (str_contains($trimmedLine, '=')) {
+                $key = trim(explode('=', $trimmedLine, 2)[0]);
+                
+                if (isset($unusedVars[$key])) {
+                    $shouldRemove = true;
+
+                    if ($interactive) {
+                        $shouldRemove = $this->confirm("Remove unused variable: {$key}?");
+                    }
+
+                    if ($shouldRemove) {
+                        if (!$dryRun) {
+                            $this->line("Removed: {$key}");
+                        }
+                        $changes[] = "Removed unused variable: {$key}";
+                        continue;
+                    }
+                }
+            }
+            
+            $newLines[] = $line;
         }
 
         return implode("\n", $newLines);
@@ -149,11 +247,10 @@ class FixEnvCommand extends Command
     /**
      * Fix common formatting issues.
      */
-    private function fixFormattingIssues(string $content, bool $dryRun): string
+    private function fixFormattingIssues(string $content, bool $dryRun, array &$changes): string
     {
         $lines = explode("\n", $content);
         $fixedLines = [];
-        $changes = [];
 
         foreach ($lines as $line) {
             $originalLine = $line;
@@ -179,16 +276,13 @@ class FixEnvCommand extends Command
                 }
             }
 
-            $fixedLines[] = $fixedLine;
-        }
-
-        if (!empty($changes) && !$dryRun) {
-            $this->line('');
-            $this->info("Formatting fixes applied:");
-            
-            foreach ($changes as $change) {
-                $this->line("  - {$change}");
+            if (preg_match('/^([^=]+)=$/', $fixedLine, $matches)) {
+                $key = $matches[1];
+                $fixedLine = "{$key}=";
+                $changes[] = "Fixed empty value: {$key}";
             }
+
+            $fixedLines[] = $fixedLine;
         }
 
         return implode("\n", $fixedLines);

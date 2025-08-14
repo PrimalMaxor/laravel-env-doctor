@@ -16,7 +16,10 @@ class SecurityEnvCommand extends Command
                             {--file= : Path to the env file to scan (default: .env)}
                             {--strict : Enable strict security checks}
                             {--check-git : Check if sensitive files are committed to git}
-                            {--format=text : Output format (text, json, xml)}';
+                            {--format=text : Output format (text, json, xml)}
+                            {--risk-level= : Minimum risk level to report (critical,high,medium,low)}
+                            {--export : Export findings to a file}
+                            {--fix : Auto-fix simple security issues where possible}';
 
     /**
      * The console command description.
@@ -34,6 +37,9 @@ class SecurityEnvCommand extends Command
         $strict = $this->option('strict');
         $checkGit = $this->option('check-git');
         $format = $this->option('format');
+        $riskLevel = $this->option('risk-level');
+        $export = $this->option('export');
+        $fix = $this->option('fix');
 
         if (!File::exists($filePath)) {
             $this->error("File not found: {$filePath}");
@@ -62,6 +68,23 @@ class SecurityEnvCommand extends Command
         if ($checkGit) {
             $gitIssues = $this->checkGitSecurity($filePath);
             $securityIssues = array_merge($securityIssues, $gitIssues);
+        }
+
+        if ($riskLevel) {
+            $securityIssues = $this->filterByRiskLevel($securityIssues, $riskLevel);
+        }
+
+        if ($fix && !empty($securityIssues)) {
+            $fixedContent = $this->autoFixSecurity($content, $securityIssues);
+
+            if ($fixedContent !== $content) {
+                File::put($filePath, $fixedContent);
+                $this->info("Auto-fixed security issues and updated file.");
+            }
+        }
+
+        if ($export && !empty($securityIssues)) {
+            $this->exportFindings($securityIssues, $filePath);
         }
 
         $this->displaySecurityResults($securityIssues, $format);
@@ -102,7 +125,8 @@ class SecurityEnvCommand extends Command
                     'message' => "Sensitive key detected: {$key}",
                     'line_content' => $line,
                     'risk' => $this->getRiskLevel($severity),
-                    'recommendation' => $this->getRecommendation($key, $value)
+                    'recommendation' => $this->getRecommendation($key, $value),
+                    'fixable' => false
                 ];
             }
         }
@@ -118,7 +142,8 @@ class SecurityEnvCommand extends Command
                     'message' => "Default/example value detected: {$value}",
                     'line_content' => $line,
                     'risk' => 'medium',
-                    'recommendation' => 'Replace with actual secure value'
+                    'recommendation' => 'Replace with actual secure value',
+                    'fixable' => false
                 ];
             }
 
@@ -129,7 +154,21 @@ class SecurityEnvCommand extends Command
                     'message' => "Empty sensitive key: {$key}",
                     'line_content' => $line,
                     'risk' => 'medium',
-                    'recommendation' => 'Set a secure value or remove if not needed'
+                    'recommendation' => 'Set a secure value or remove if not needed',
+                    'fixable' => false
+                ];
+            }
+
+            if (in_array(strtolower($value), ['localhost', '127.0.0.1', '0.0.0.0']) && 
+                (stripos($key, 'host') !== false || stripos($key, 'url') !== false)) {
+                $issues[] = [
+                    'type' => 'warning',
+                    'line' => $lineNumber,
+                    'message' => "Local development value in production: {$value}",
+                    'line_content' => $line,
+                    'risk' => 'medium',
+                    'recommendation' => 'Use production host/URL values',
+                    'fixable' => false
                 ];
             }
         }
@@ -150,6 +189,7 @@ class SecurityEnvCommand extends Command
             'jwt_secret' => 'error',
             'encryption_key' => 'error',
             'master_key' => 'error',
+            'app_key' => 'error',
             
             'key' => 'warning',
             'token' => 'warning',
@@ -158,6 +198,7 @@ class SecurityEnvCommand extends Command
             'refresh_token' => 'warning',
             'session_secret' => 'warning',
             'cipher_key' => 'warning',
+            'database_password' => 'warning',
             
             'username' => 'info',
             'email' => 'info',
@@ -189,7 +230,7 @@ class SecurityEnvCommand extends Command
     {
         $issues = [];
 
-        $weakPasswords = ['password', '123456', 'admin', 'root', 'test', 'secret'];
+        $weakPasswords = ['password', '123456', 'admin', 'root', 'test', 'secret', 'changeme', 'default'];
         if (in_array(strtolower($value), $weakPasswords)) {
             $issues[] = [
                 'type' => 'error',
@@ -197,7 +238,8 @@ class SecurityEnvCommand extends Command
                 'message' => "Weak password detected: {$value}",
                 'line_content' => $line,
                 'risk' => 'high',
-                'recommendation' => 'Use a strong, unique password'
+                'recommendation' => 'Use a strong, unique password',
+                'fixable' => false
             ];
         }
 
@@ -208,7 +250,20 @@ class SecurityEnvCommand extends Command
                 'message' => "Short API key detected (length: " . strlen($value) . ")",
                 'line_content' => $line,
                 'risk' => 'medium',
-                'recommendation' => 'Use API keys with at least 32 characters'
+                'recommendation' => 'Use API keys with at least 32 characters',
+                'fixable' => false
+            ];
+        }
+
+        if (preg_match('/^(admin|user|test|demo|guest)$/i', $value)) {
+            $issues[] = [
+                'type' => 'warning',
+                'line' => $lineNumber,
+                'message' => "Predictable username detected: {$value}",
+                'line_content' => $line,
+                'risk' => 'medium',
+                'recommendation' => 'Use unique, non-predictable usernames',
+                'fixable' => false
             ];
         }
 
@@ -229,7 +284,8 @@ class SecurityEnvCommand extends Command
                 'message' => 'Ensure .env file has restricted permissions (600 or 400)',
                 'line_content' => 'File permission check',
                 'risk' => 'low',
-                'recommendation' => 'Set file permissions to 600 (owner read/write only)'
+                'recommendation' => 'Set file permissions to 600 (owner read/write only)',
+                'fixable' => false
             ];
         }
 
@@ -240,7 +296,20 @@ class SecurityEnvCommand extends Command
                 'message' => 'Commented sensitive data detected',
                 'line_content' => 'Commented sensitive values',
                 'risk' => 'medium',
-                'recommendation' => 'Remove commented sensitive data'
+                'recommendation' => 'Remove commented sensitive data',
+                'fixable' => true
+            ];
+        }
+
+        if (preg_match('/#.*(sk-|pk_|ghp_|gho_|ghu_|ghs_|ghr_)/i', $content)) {
+            $issues[] = [
+                'type' => 'error',
+                'line' => 'file',
+                'message' => 'Potential secret key pattern detected in comments',
+                'line_content' => 'Secret key in comment',
+                'risk' => 'high',
+                'recommendation' => 'Remove any secret keys from comments',
+                'fixable' => true
             ];
         }
 
@@ -264,7 +333,8 @@ class SecurityEnvCommand extends Command
                     'message' => "Environment file is tracked by Git: {$filePath}",
                     'line_content' => 'File is committed to version control',
                     'risk' => 'critical',
-                    'recommendation' => 'Remove from Git tracking: git rm --cached {$filePath}'
+                    'recommendation' => 'Remove from Git tracking: git rm --cached {$filePath}',
+                    'fixable' => false
                 ];
             } else {
                 $issues[] = [
@@ -273,12 +343,89 @@ class SecurityEnvCommand extends Command
                     'message' => "Environment file is not tracked by Git (good)",
                     'line_content' => 'File is properly ignored',
                     'risk' => 'none',
-                    'recommendation' => 'Continue to keep this file out of version control'
+                    'recommendation' => 'Continue to keep this file out of version control',
+                    'fixable' => false
                 ];
+            }
+
+            if (File::exists('.gitignore')) {
+                $gitignore = File::get('.gitignore');
+                if (!str_contains($gitignore, $filePath) && !str_contains($gitignore, '*.env')) {
+                    $issues[] = [
+                        'type' => 'warning',
+                        'line' => 'git',
+                        'message' => "Environment file not in .gitignore",
+                        'line_content' => 'File may be accidentally committed',
+                        'risk' => 'medium',
+                        'recommendation' => 'Add {$filePath} to .gitignore',
+                        'fixable' => true
+                    ];
+                }
             }
         }
 
         return $issues;
+    }
+
+    /**
+     * Filter issues by risk level.
+     */
+    private function filterByRiskLevel(array $issues, string $riskLevel): array
+    {
+        $riskLevels = ['critical' => 4, 'high' => 3, 'medium' => 2, 'low' => 1, 'none' => 0];
+        $minRisk = $riskLevels[strtolower($riskLevel)] ?? 0;
+
+        return array_filter($issues, function($issue) use ($riskLevels, $minRisk) {
+            $issueRisk = $riskLevels[$issue['risk']] ?? 0;
+
+            return $issueRisk >= $minRisk;
+        });
+    }
+
+    /**
+     * Auto-fix simple security issues.
+     */
+    private function autoFixSecurity(string $content, array $issues): string
+    {
+        $lines = explode("\n", $content);
+        $fixedLines = [];
+
+        foreach ($lines as $lineNumber => $line) {
+            $fixedLine = $line;
+
+            $lineIssues = array_filter($issues, fn($i) => $i['line'] === $lineNumber + 1 && $i['fixable']);
+
+            foreach ($lineIssues as $issue) {
+                switch ($issue['message']) {
+                    case 'Commented sensitive data detected':
+                        if (preg_match('/^#\s*(password|secret|key|token)\s*=/i', $line)) {
+                            $fixedLine = "# REMOVED: " . $line;
+                        }
+                        break;
+                }
+            }
+
+            $fixedLines[] = $fixedLine;
+        }
+
+        return implode("\n", $fixedLines);
+    }
+
+    /**
+     * Export findings to a file.
+     */
+    private function exportFindings(array $issues, string $filePath): void
+    {
+        $exportPath = 'security-scan-' . date('Y-m-d-H-i-s') . '.json';
+        $exportData = [
+            'scan_date' => date('c'),
+            'file_scanned' => $filePath,
+            'total_issues' => count($issues),
+            'issues' => $issues
+        ];
+
+        File::put($exportPath, json_encode($exportData, JSON_PRETTY_PRINT));
+        $this->info("Security findings exported to: {$exportPath}");
     }
 
     /**
@@ -351,8 +498,9 @@ class SecurityEnvCommand extends Command
             $risk = strtoupper($issue['risk']);
             $type = strtoupper($issue['type']);
             $line = $issue['line'] === 'file' ? 'FILE' : ($issue['line'] === 'git' ? 'GIT' : "Line {$issue['line']}");
+            $fixable = $issue['fixable'] ? ' [FIXABLE]' : '';
             
-            $this->line("[{$risk}] {$type} - {$line}: {$issue['message']}");
+            $this->line("[{$risk}]{$fixable} {$type} - {$line}: {$issue['message']}");
             if ($issue['line'] !== 'file' && $issue['line'] !== 'git') {
                 $this->line("  {$issue['line_content']}");
             }
@@ -370,7 +518,7 @@ class SecurityEnvCommand extends Command
         $xml .= "<security-scan-results>\n";
         
         foreach ($issues as $issue) {
-            $xml .= "  <issue type=\"{$issue['type']}\" risk=\"{$issue['risk']}\" line=\"{$issue['line']}\">\n";
+            $xml .= "  <issue type=\"{$issue['type']}\" risk=\"{$issue['risk']}\" line=\"{$issue['line']}\" fixable=\"" . ($issue['fixable'] ? 'true' : 'false') . "\">\n";
             $xml .= "    <message>" . htmlspecialchars($issue['message']) . "</message>\n";
             $xml .= "    <content>" . htmlspecialchars($issue['line_content']) . "</content>\n";
             $xml .= "    <recommendation>" . htmlspecialchars($issue['recommendation']) . "</recommendation>\n";
