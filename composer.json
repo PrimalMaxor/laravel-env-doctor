@@ -2,6 +2,7 @@
     "name": "primalmaxor/laravel-env-doctor",
     "description": "A Laravel package to diagnose and fix common environment configuration issues",
     "type": "library",
+    "version": "1.0.0",
     "license": "MIT",
     "authors": [
         {
@@ -54,6 +55,5 @@
         "stan": "vendor/bin/phpstan analyse src tests",
         "audit": "php artisan env:audit --config --detailed"
     },
-    "minimum-stability": "stable",
     "prefer-stable": true
 } 
